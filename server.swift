@@ -13,23 +13,23 @@ class MacRemoteServer {
     init() {
         setupListener()
     }
-    
+
     func start() {
         listener?.start(queue: queue)
         dispatchMain() // Keeps the command-line execution alive
     }
-    
+
     private func setupListener() {
         do {
             // Configure UDP parameters and enable peer-to-peer sharing for discovery
             let params = NWParameters.udp
             params.includePeerToPeer = true
-            
+
             self.listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: PORT)!)
-            
+
             // Broadcast the server across the local Wi-Fi network using Bonjour/mDNS
             self.listener?.service = NWListener.Service(name: "Mac Remote Trackpad", type: "_remotepad._udp")
-            
+
             self.listener?.stateUpdateHandler = { state in
                 switch state {
                 case .failed(_):
@@ -38,49 +38,49 @@ class MacRemoteServer {
                     break
                 }
             }
-            
+
             self.listener?.newConnectionHandler = { [weak self] connection in
                 self?.handleConnection(connection)
             }
-            
+
         } catch {
             exit(1)
         }
     }
-    
+
     private func handleConnection(_ connection: NWConnection) {
         connection.start(queue: queue)
         receiveData(on: connection)
     }
-    
+
     private func receiveData(on connection: NWConnection) {
         connection.receiveMessage { [weak self] (data, context, isComplete, error) in
             guard let self = self else { return }
-            
+
             if error != nil {
                 return
             }
-            
+
             if let data = data, !data.isEmpty {
                 if let message = String(data: data, encoding: .utf8) {
-                    self.processMessage(message)
+                    self.processMessage(message, from: connection)
                 }
             }
-            
+
             // Re-register the receive handler loop for the next UDP packet
             self.receiveData(on: connection)
         }
     }
-    
-    private func processMessage(_ message: String) {
+
+    private func processMessage(_ message: String, from connection: NWConnection) {
         let cleanedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         let components = cleanedMessage.components(separatedBy: ",")
-        guard !components.isEmpty else { 
+        guard !components.isEmpty else {
             return
         }
-        
+
         let command = components[0]
-        
+
         switch command {
         case "MOVE":
             if components.count == 3, let dx = Double(components[1]), let dy = Double(components[2]) {
@@ -98,6 +98,8 @@ class MacRemoteServer {
             }
         case "CLICK":
             leftClick()
+        case "PING":
+            sendPong(to: connection)
         case "LEFT_DOWN":
             isLeftDown = true
             postClickEvent(type: .leftMouseDown, button: .left)
@@ -143,22 +145,22 @@ class MacRemoteServer {
         rightDown?.post(tap: .cghidEventTap)
         rightUp?.post(tap: .cghidEventTap)
     }
-    
+
     private func moveMouse(dx: Double, dy: Double) {
         let currentLoc = CGEvent(source: nil)?.location ?? .zero
         let newX = currentLoc.x + CGFloat(dx)
         let newY = currentLoc.y + CGFloat(dy)
         let targetPoint = CGPoint(x: newX, y: newY)
-        
+
         let eventType: CGEventType = isLeftDown ? .leftMouseDragged : .mouseMoved
 
         guard let moveEvent = CGEvent(mouseEventSource: nil, mouseType: eventType, mouseCursorPosition: targetPoint, mouseButton: .left) else {
             return
         }
-        
+
         moveEvent.post(tap: .cghidEventTap)
     }
-    
+
     private func executeGesture(type: String, modifier: String) {
         switch type {
         case "swipe_up":
@@ -177,15 +179,21 @@ class MacRemoteServer {
             break
         }
     }
-    
+
     private func triggerSystemEvent(keyCode: Int, modifier: String) {
         // This completely bypasses CGEvent and asks the OS directly to press the keys
         let scriptSource = "tell application \"System Events\" to key code \(keyCode) using \(modifier) down"
-        
+
         var error: NSDictionary?
         if let script = NSAppleScript(source: scriptSource) {
             script.executeAndReturnError(&error)
         }
+    }
+
+    private func sendPong(to connection: NWConnection) {
+        let computerName = Host.current().localizedName ?? "Mac"
+        let pongData = "PONG,\(computerName)".data(using: .utf8)
+        connection.send(content: pongData, completion: .contentProcessed({ _ in }))
     }
 }
 
