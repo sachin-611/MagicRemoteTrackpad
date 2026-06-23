@@ -97,25 +97,30 @@ class MacRemoteServer {
                 scrollMouse(dx: dx, dy: dy)
             }
         case "CLICK":
-            leftClick()
+            let clickCount = components.count >= 2 ? Int64(components[1]) ?? 1 : 1
+            leftClick(clickCount: clickCount)
         case "PING":
             sendPong(to: connection)
         case "LEFT_DOWN":
+            let clickCount = components.count >= 2 ? Int64(components[1]) ?? 1 : 1
             isLeftDown = true
-            postClickEvent(type: .leftMouseDown, button: .left)
+            postClickEvent(type: .leftMouseDown, button: .left, clickCount: clickCount)
         case "LEFT_UP":
+            let clickCount = components.count >= 2 ? Int64(components[1]) ?? 1 : 1
             isLeftDown = false
-            postClickEvent(type: .leftMouseUp, button: .left)
+            postClickEvent(type: .leftMouseUp, button: .left, clickCount: clickCount)
         case "RIGHT_CLICK":
-            rightClick()
+            let clickCount = components.count >= 2 ? Int64(components[1]) ?? 1 : 1
+            rightClick(clickCount: clickCount)
         default:
             break
         }
     }
 
-    private func postClickEvent(type: CGEventType, button: CGMouseButton) {
+    private func postClickEvent(type: CGEventType, button: CGMouseButton, clickCount: Int64 = 1) {
         let currentLoc = CGEvent(source: nil)?.location ?? .zero
         let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: currentLoc, mouseButton: button)
+        event?.setIntegerValueField(.mouseEventClickState, value: clickCount)
         event?.post(tap: .cghidEventTap)
     }
 
@@ -128,22 +133,14 @@ class MacRemoteServer {
         scrollEvent.post(tap: .cghidEventTap)
     }
 
-    private func leftClick() {
-        let currentLoc = CGEvent(source: nil)?.location ?? .zero
-        let leftDown = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: currentLoc, mouseButton: .left)
-        let leftUp = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: currentLoc, mouseButton: .left)
-
-        leftDown?.post(tap: .cghidEventTap)
-        leftUp?.post(tap: .cghidEventTap)
+    private func leftClick(clickCount: Int64) {
+        postClickEvent(type: .leftMouseDown, button: .left, clickCount: clickCount)
+        postClickEvent(type: .leftMouseUp, button: .left, clickCount: clickCount)
     }
 
-    private func rightClick() {
-        let currentLoc = CGEvent(source: nil)?.location ?? .zero
-        let rightDown = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: currentLoc, mouseButton: .right)
-        let rightUp = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: currentLoc, mouseButton: .right)
-
-        rightDown?.post(tap: .cghidEventTap)
-        rightUp?.post(tap: .cghidEventTap)
+    private func rightClick(clickCount: Int64) {
+        postClickEvent(type: .rightMouseDown, button: .right, clickCount: clickCount)
+        postClickEvent(type: .rightMouseUp, button: .right, clickCount: clickCount)
     }
 
     private func moveMouse(dx: Double, dy: Double) {
@@ -175,6 +172,12 @@ class MacRemoteServer {
         case "swipe_right":
             // Keycode 124 is Right Arrow
             triggerSystemEvent(keyCode: 124, modifier: modifier)
+//         case "page_back":
+//             // Keycode 33 is '['
+//             triggerSystemEvent(keyCode: 33, modifier: "command")
+//         case "page_forward":
+//             // Keycode 30 is ']'
+//             triggerSystemEvent(keyCode: 30, modifier: "command")
         default:
             break
         }
