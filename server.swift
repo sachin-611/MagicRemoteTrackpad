@@ -116,10 +116,11 @@ class MacRemoteServer {
                 logger.warning("⚠️ Malformed MOVE command payload sequence received: '\(cleanedMessage, privacy: .public)'")
             }
         case "GESTURE":
-            if components.count == 2 {
+            if components.count >= 2 {
                 let gestureType = components[1]
-                logger.info("💥 Parsed command: GESTURE | Type: \(gestureType, privacy: .public)")
-                executeGesture(type: gestureType)
+                let modifier = components.count >= 3 ? components[2] : "control"
+                logger.info("💥 Parsed command: GESTURE | Type: \(gestureType, privacy: .public) | Modifier: \(modifier, privacy: .public)")
+                executeGesture(type: gestureType, modifier: modifier)
             } else {
                 logger.warning("⚠️ Malformed GESTURE command payload sequence received: '\(cleanedMessage, privacy: .public)'")
             }
@@ -203,33 +204,33 @@ class MacRemoteServer {
         logger.debug("🖱️ Motion: \(eventType == .leftMouseDragged ? "DRAG" : "MOVE") to (\(Int(newX)), \(Int(newY)))")
     }
     
-    private func executeGesture(type: String) {
+    private func executeGesture(type: String, modifier: String) {
         switch type {
         case "swipe_up":
             logger.info("🖥️ Executing AppleScript hook: Mission Control.")
             // Keycode 126 is Up Arrow
-            triggerSystemEvent(keyCode: 126)
+            triggerSystemEvent(keyCode: 126, modifier: modifier)
         case "swipe_down":
             logger.info("🔽 Executing AppleScript hook: App Exposé.")
             // Keycode 125 is Down Arrow
-            triggerSystemEvent(keyCode: 125)
+            triggerSystemEvent(keyCode: 125, modifier: modifier)
         case "swipe_left":
             logger.info("◀️ Executing AppleScript hook: Move Left One Space.")
             // Keycode 123 is Left Arrow
-            triggerSystemEvent(keyCode: 123)
+            triggerSystemEvent(keyCode: 123, modifier: modifier)
         case "swipe_right":
             logger.info("▶️ Executing AppleScript hook: Move Right One Space.")
             // Keycode 124 is Right Arrow
-            triggerSystemEvent(keyCode: 124)
+            triggerSystemEvent(keyCode: 124, modifier: modifier)
         default:
             logger.warning("⚠️ Attempted to execute an unmapped gesture action sequence: '\(type, privacy: .public)'")
             break
         }
     }
     
-    private func triggerSystemEvent(keyCode: Int) {
+    private func triggerSystemEvent(keyCode: Int, modifier: String) {
         // This completely bypasses CGEvent and asks the OS directly to press the keys
-        let scriptSource = "tell application \"System Events\" to key code \(keyCode) using control down"
+        let scriptSource = "tell application \"System Events\" to key code \(keyCode) using \(modifier) down"
         
         var error: NSDictionary?
         if let script = NSAppleScript(source: scriptSource) {
@@ -239,7 +240,7 @@ class MacRemoteServer {
                 // If AppleScript fails, it's almost always a permissions issue.
                 logger.error("❌ AppleScript execution failed. Check System Settings > Privacy & Security > Automation.")
             } else {
-                logger.debug("⌨️ System Events successfully fired keycode \(keyCode, privacy: .public)")
+                logger.debug("⌨️ System Events successfully fired keycode \(keyCode, privacy: .public) with \(modifier, privacy: .public)")
             }
         }
     }
