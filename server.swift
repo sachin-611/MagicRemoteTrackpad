@@ -8,6 +8,7 @@ let PORT: UInt16 = 12345
 class MacRemoteServer {
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "com.remote.server.queue")
+    private let gestureQueue = DispatchQueue(label: "com.remote.server.gestureQueue")
     private var isLeftDown = false
 
     init() {
@@ -15,7 +16,9 @@ class MacRemoteServer {
     }
 
     func start() {
+        print("🚀 Server starting...")
         listener?.start(queue: queue)
+        print("✅ Server is running. Listening on UDP port \(PORT)")
         dispatchMain() // Keeps the command-line execution alive
     }
 
@@ -57,18 +60,22 @@ class MacRemoteServer {
         connection.receiveMessage { [weak self] (data, context, isComplete, error) in
             guard let self = self else { return }
 
-            if error != nil {
-                return
-            }
-
-            if let data = data, !data.isEmpty {
+            if let error = error {
+                print("📩 Receive error: \(error)")
+                // Check if the connection is still viable
+                if case .posix(let code) = error, code == .ECANCELED {
+                    return
+                }
+            } else if let data = data, !data.isEmpty {
                 if let message = String(data: data, encoding: .utf8) {
                     self.processMessage(message, from: connection)
                 }
             }
 
-            // Re-register the receive handler loop for the next UDP packet
-            self.receiveData(on: connection)
+            // Always re-register the receive handler loop unless the connection is cancelled/failed
+            if connection.state == .ready || connection.state == .preparing || connection.state == .setup {
+                self.receiveData(on: connection)
+            }
         }
     }
 
@@ -184,12 +191,17 @@ class MacRemoteServer {
     }
 
     private func triggerSystemEvent(keyCode: Int, modifier: String) {
-        // This completely bypasses CGEvent and asks the OS directly to press the keys
-        let scriptSource = "tell application \"System Events\" to key code \(keyCode) using \(modifier) down"
-
-        var error: NSDictionary?
-        if let script = NSAppleScript(source: scriptSource) {
-            script.executeAndReturnError(&error)
+        // Run AppleScript on a separate serial queue to prevent blocking the network queue
+        // and to ensure gestures are executed in the order they are received.
+        gestureQueue.async {
+            let scriptSource = "tell application \"System Events\" to key code \(keyCode) using \(modifier) down"
+            var error: NSDictionary?
+            if let script = NSAppleScript(source: scriptSource) {
+                script.executeAndReturnError(&error)
+                if let err = error {
+                    print("🍎 AppleScript Error: \(err)")
+                }
+            }
         }
     }
 
