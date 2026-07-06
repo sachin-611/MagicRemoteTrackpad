@@ -14,6 +14,7 @@ class MacRemoteServer {
 
     // Internal cursor tracking to prevent "stuttering" lag
     private var lastKnownMousePos: CGPoint?
+    private var movePacketCount = 0
 
     private var isAtTopEdge = false
     private var isAtBottomEdge = false
@@ -209,6 +210,13 @@ class MacRemoteServer {
     }
 
     private func moveMouse(dx: Double, dy: Double) {
+        movePacketCount += 1
+
+        // Periodically sync with real OS position to prevent long-term drift
+        if movePacketCount % 30 == 0 {
+            lastKnownMousePos = nil
+        }
+
         let basePos: CGPoint
         if let lastPos = lastKnownMousePos {
             basePos = lastPos
@@ -216,13 +224,30 @@ class MacRemoteServer {
             basePos = CGEvent(source: nil)?.location ?? .zero
         }
 
-        let newX = basePos.x + CGFloat(dx)
-        let newY = basePos.y + CGFloat(dy)
+        var newX = basePos.x + CGFloat(dx)
+        var newY = basePos.y + CGFloat(dy)
         let targetPoint = CGPoint(x: newX, y: newY)
-        lastKnownMousePos = targetPoint
+
+        // Check if this point is on any screen
+        var displayID: CGDirectDisplayID = 0
+        var count: UInt32 = 0
+        CGGetDisplaysWithPoint(targetPoint, 1, &displayID, &count)
+
+        if count == 0 {
+            // Off-screen! Clamp to the boundary of the current screen to prevent "stickiness"
+            var currentDisplayID: CGDirectDisplayID = 0
+            CGGetDisplaysWithPoint(basePos, 1, &currentDisplayID, &count)
+            let bounds = CGDisplayBounds(count > 0 ? currentDisplayID : CGMainDisplayID())
+
+            newX = max(bounds.origin.x, min(newX, bounds.origin.x + bounds.width - 1))
+            newY = max(bounds.origin.y, min(newY, bounds.origin.y + bounds.height - 1))
+        }
+
+        let finalPoint = CGPoint(x: newX, y: newY)
+        lastKnownMousePos = finalPoint
 
         let eventType: CGEventType = isLeftDown ? .leftMouseDragged : .mouseMoved
-        guard let moveEvent = CGEvent(mouseEventSource: nil, mouseType: eventType, mouseCursorPosition: targetPoint, mouseButton: .left) else { return }
+        guard let moveEvent = CGEvent(mouseEventSource: nil, mouseType: eventType, mouseCursorPosition: finalPoint, mouseButton: .left) else { return }
 
         if isLeftDown {
             moveEvent.setIntegerValueField(.mouseEventClickState, value: currentClickCount)
@@ -231,11 +256,11 @@ class MacRemoteServer {
         moveEvent.post(tap: .cghidEventTap)
 
         // Edge Detection
-        var displayID: CGDirectDisplayID = 0
-        var count: UInt32 = 0
-        CGGetDisplaysWithPoint(targetPoint, 1, &displayID, &count)
-        let screenRect = (count > 0) ? CGDisplayBounds(displayID) : CGDisplayBounds(CGMainDisplayID())
-        let relY = targetPoint.y - screenRect.origin.y
+        var edgeDisplayID: CGDirectDisplayID = 0
+        var edgeCount: UInt32 = 0
+        CGGetDisplaysWithPoint(finalPoint, 1, &edgeDisplayID, &edgeCount)
+        let screenRect = (edgeCount > 0) ? CGDisplayBounds(edgeDisplayID) : CGDisplayBounds(CGMainDisplayID())
+        let relY = finalPoint.y - screenRect.origin.y
 
         if relY <= 2 {
             if !isAtTopEdge {
