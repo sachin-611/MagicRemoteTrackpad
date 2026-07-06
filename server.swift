@@ -205,11 +205,11 @@ class MacRemoteServer {
         var finalDisplayID: CGDirectDisplayID = 0
         var finalCount: UInt32 = 0
         CGGetDisplaysWithPoint(targetPoint, 1, &finalDisplayID, &finalCount)
-        let screenRect = (finalCount > 0) ? CGDisplayBounds(finalDisplayID) : CGDisplayBounds(CGMainDisplayID())
+//         let screenRect = (finalCount > 0) ? CGDisplayBounds(finalDisplayID) : CGDisplayBounds(CGMainDisplayID())
 
         // Coordinates relative to the current screen's origin for edge detection
-        let relY = targetPoint.y - screenRect.origin.y
-        let relX = targetPoint.x - screenRect.origin.x
+//         let relY = targetPoint.y - screenRect.origin.y
+//         let relX = targetPoint.x - screenRect.origin.x
 
         // Automatic edge triggers (Menu Bar/Dock) have been removed to allow manual clicking
         // and prevent interference with top-of-screen UI like browser tabs.
