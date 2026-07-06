@@ -134,6 +134,8 @@ class MacRemoteServer {
         let currentLoc = CGEvent(source: nil)?.location ?? .zero
         let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: currentLoc, mouseButton: button)
         event?.setIntegerValueField(.mouseEventClickState, value: clickCount)
+        // Explicitly clear flags to prevent stuck modifiers (like Control) from turning a left click into a right click
+        event?.flags = []
         event?.post(tap: .cghidEventTap)
     }
 
@@ -160,10 +162,29 @@ class MacRemoteServer {
         // Use a source-less event to get the current location without delay
         let currentLoc = CGEvent(source: nil)?.location ?? .zero
 
-        let newX = currentLoc.x + CGFloat(dx)
-        let newY = currentLoc.y + CGFloat(dy)
-        let targetPoint = CGPoint(x: newX, y: newY)
+        var newX = currentLoc.x + CGFloat(dx)
+        var newY = currentLoc.y + CGFloat(dy)
+        let proposedPoint = CGPoint(x: newX, y: newY)
 
+        // Check if the proposed point is within any active display
+        var displayID: CGDirectDisplayID = 0
+        var count: UInt32 = 0
+        CGGetDisplaysWithPoint(proposedPoint, 1, &displayID, &count)
+
+        if count == 0 {
+            // Point is outside all screens. Clamp it to the display the cursor is currently on.
+            // This prevents "sticky" movement in dead zones of multi-monitor setups.
+            var currentDisplayID: CGDirectDisplayID = 0
+            var currentCount: UInt32 = 0
+            CGGetDisplaysWithPoint(currentLoc, 1, &currentDisplayID, &currentCount)
+
+            let refRect = (currentCount > 0) ? CGDisplayBounds(currentDisplayID) : CGDisplayBounds(CGMainDisplayID())
+
+            newX = max(refRect.origin.x, min(refRect.origin.x + refRect.size.width - 1, newX))
+            newY = max(refRect.origin.y, min(refRect.origin.y + refRect.size.height - 1, newY))
+        }
+
+        let targetPoint = CGPoint(x: newX, y: newY)
         let eventType: CGEventType = isLeftDown ? .leftMouseDragged : .mouseMoved
 
         // IMPORTANT: Post the move event FIRST so the OS knows where the cursor is
@@ -176,16 +197,17 @@ class MacRemoteServer {
             moveEvent.setIntegerValueField(.mouseEventClickState, value: currentClickCount)
         }
 
+        // Clear flags to ensure move events don't inherit stuck modifiers
+        moveEvent.flags = []
         moveEvent.post(tap: .cghidEventTap)
 
-        // Now detect which display the cursor is currently on for edge gestures
-        var displayID: CGDirectDisplayID = 0
-        var count: UInt32 = 0
-        CGGetDisplaysWithPoint(targetPoint, 1, &displayID, &count)
+        // For edge gesture detection, use the actual screen the cursor landed on
+        var finalDisplayID: CGDirectDisplayID = 0
+        var finalCount: UInt32 = 0
+        CGGetDisplaysWithPoint(targetPoint, 1, &finalDisplayID, &finalCount)
+        let screenRect = (finalCount > 0) ? CGDisplayBounds(finalDisplayID) : CGDisplayBounds(CGMainDisplayID())
 
-        let screenRect = (count > 0) ? CGDisplayBounds(displayID) : CGDisplayBounds(CGMainDisplayID())
-
-        // Coordinates relative to the current screen's origin
+        // Coordinates relative to the current screen's origin for edge detection
         let relY = targetPoint.y - screenRect.origin.y
         let relX = targetPoint.x - screenRect.origin.x
 
@@ -197,9 +219,7 @@ class MacRemoteServer {
             }
         } else if isAtTopEdge && relY > 20 {
             isAtTopEdge = false
-            if !isLeftDown {
-                triggerSystemEvent(keyCode: 53, modifier: "none") // Escape
-            }
+            // Automatic Escape removed to prevent closing menus when moving away from edge
         }
 
         // Detect reaching bottom edge of the current screen
@@ -214,9 +234,7 @@ class MacRemoteServer {
             }
         } else if isAtBottomEdge && relY < screenRect.height - 40 {
             isAtBottomEdge = false
-            if !isLeftDown {
-                triggerSystemEvent(keyCode: 53, modifier: "none") // Escape
-            }
+            // Automatic Escape removed to prevent closing menus when moving away from edge
         }
     }
 
