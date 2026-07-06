@@ -157,39 +157,17 @@ class MacRemoteServer {
     }
 
     private func moveMouse(dx: Double, dy: Double) {
+        // Use a source-less event to get the current location without delay
         let currentLoc = CGEvent(source: nil)?.location ?? .zero
+
         let newX = currentLoc.x + CGFloat(dx)
         let newY = currentLoc.y + CGFloat(dy)
         let targetPoint = CGPoint(x: newX, y: newY)
 
-        let screenRect = CGDisplayBounds(CGMainDisplayID())
-        let screenHeight = screenRect.height
-
-        // Detect reaching top edge (Menu Bar)
-        if newY <= 0 {
-            if !isAtTopEdge {
-                isAtTopEdge = true
-                triggerSystemEvent(keyCode: 120, modifier: "control") // Focus Menu Bar (Ctrl+F2)
-            }
-        } else if isAtTopEdge && newY > 10 { // Moving away from top
-            isAtTopEdge = false
-            // We use a slight delay or specific check if needed, but for now just send Esc
-            triggerSystemEvent(keyCode: 53, modifier: "") // Press Escape to close
-        }
-
-        // Detect reaching bottom edge (Dock)
-        if newY >= screenHeight - 2 { // Increased threshold slightly
-            if !isAtBottomEdge {
-                isAtBottomEdge = true
-                triggerSystemEvent(keyCode: 99, modifier: "control") // Focus Dock (Ctrl+F3)
-            }
-        } else if isAtBottomEdge && newY < screenHeight - 100 { // Increased threshold to clear Dock area
-            isAtBottomEdge = false
-            triggerSystemEvent(keyCode: 53, modifier: "") // Press Escape to close
-        }
-
         let eventType: CGEventType = isLeftDown ? .leftMouseDragged : .mouseMoved
 
+        // IMPORTANT: Post the move event FIRST so the OS knows where the cursor is
+        // before we trigger any keyboard-based gestures.
         guard let moveEvent = CGEvent(mouseEventSource: nil, mouseType: eventType, mouseCursorPosition: targetPoint, mouseButton: .left) else {
             return
         }
@@ -199,6 +177,47 @@ class MacRemoteServer {
         }
 
         moveEvent.post(tap: .cghidEventTap)
+
+        // Now detect which display the cursor is currently on for edge gestures
+        var displayID: CGDirectDisplayID = 0
+        var count: UInt32 = 0
+        CGGetDisplaysWithPoint(targetPoint, 1, &displayID, &count)
+
+        let screenRect = (count > 0) ? CGDisplayBounds(displayID) : CGDisplayBounds(CGMainDisplayID())
+
+        // Coordinates relative to the current screen's origin
+        let relY = targetPoint.y - screenRect.origin.y
+        let relX = targetPoint.x - screenRect.origin.x
+
+        // Detect reaching top edge of the current screen
+        if relY <= 2 { // Slightly more generous threshold
+            if !isAtTopEdge {
+                isAtTopEdge = true
+                triggerSystemEvent(keyCode: 120, modifier: "control") // Focus Menu Bar
+            }
+        } else if isAtTopEdge && relY > 20 {
+            isAtTopEdge = false
+            if !isLeftDown {
+                triggerSystemEvent(keyCode: 53, modifier: "none") // Escape
+            }
+        }
+
+        // Detect reaching bottom edge of the current screen
+        // We use a small delay for the Dock to ensure the OS registers the mouse "push"
+        if relY >= screenRect.height - 2 {
+            if !isAtBottomEdge {
+                isAtBottomEdge = true
+                // Small delay to let the OS recognize the mouse is at the bottom of THIS screen
+                gestureQueue.asyncAfter(deadline: .now() + 0.1) {
+                    self.triggerSystemEvent(keyCode: 99, modifier: "control") // Focus Dock
+                }
+            }
+        } else if isAtBottomEdge && relY < screenRect.height - 40 {
+            isAtBottomEdge = false
+            if !isLeftDown {
+                triggerSystemEvent(keyCode: 53, modifier: "none") // Escape
+            }
+        }
     }
 
     private func executeGesture(type: String, modifier: String) {
@@ -228,13 +247,13 @@ class MacRemoteServer {
 
     private func triggerSystemEvent(keyCode: Int, modifier: String) {
         // Run AppleScript on a separate serial queue to prevent blocking the network queue
-        // and to ensure gestures are executed in the order they are received.
         gestureQueue.async {
-            let scriptSource: String
-            if modifier.isEmpty || modifier.lowercased() == "none" {
-                scriptSource = "tell application \"System Events\" to key code \(keyCode)"
-            } else {
-                scriptSource = "tell application \"System Events\" to key code \(keyCode) using {\(modifier) down}"
+            let mod = modifier.lowercased().trimmingCharacters(in: .whitespaces)
+            var scriptSource = "tell application \"System Events\" to key code \(keyCode)"
+
+            if !mod.isEmpty && mod != "none" {
+                // Simplified syntax for single modifiers to avoid "type constant" errors
+                scriptSource += " using \(mod) down"
             }
 
             var error: NSDictionary?
@@ -242,7 +261,7 @@ class MacRemoteServer {
                 script.executeAndReturnError(&error)
                 if let err = error {
                     print("🍎 AppleScript Error: \(err)")
-                    print("🍎 Script attempted: \(scriptSource)")
+                    print("🍎 Attempted Script: \(scriptSource)")
                 }
             }
         }
