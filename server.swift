@@ -211,31 +211,8 @@ class MacRemoteServer {
         let relY = targetPoint.y - screenRect.origin.y
         let relX = targetPoint.x - screenRect.origin.x
 
-        // Detect reaching top edge of the current screen
-        if relY <= 2 { // Slightly more generous threshold
-            if !isAtTopEdge {
-                isAtTopEdge = true
-                triggerSystemEvent(keyCode: 120, modifier: "control") // Focus Menu Bar
-            }
-        } else if isAtTopEdge && relY > 20 {
-            isAtTopEdge = false
-            // Automatic Escape removed to prevent closing menus when moving away from edge
-        }
-
-        // Detect reaching bottom edge of the current screen
-        // We use a small delay for the Dock to ensure the OS registers the mouse "push"
-        if relY >= screenRect.height - 2 {
-            if !isAtBottomEdge {
-                isAtBottomEdge = true
-                // Small delay to let the OS recognize the mouse is at the bottom of THIS screen
-                gestureQueue.asyncAfter(deadline: .now() + 0.1) {
-                    self.triggerSystemEvent(keyCode: 99, modifier: "control") // Focus Dock
-                }
-            }
-        } else if isAtBottomEdge && relY < screenRect.height - 40 {
-            isAtBottomEdge = false
-            // Automatic Escape removed to prevent closing menus when moving away from edge
-        }
+        // Automatic edge triggers (Menu Bar/Dock) have been removed to allow manual clicking
+        // and prevent interference with top-of-screen UI like browser tabs.
     }
 
     private func executeGesture(type: String, modifier: String) {
