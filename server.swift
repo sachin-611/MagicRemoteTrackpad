@@ -10,6 +10,7 @@ class MacRemoteServer {
     private let queue = DispatchQueue(label: "com.remote.server.queue")
     private let gestureQueue = DispatchQueue(label: "com.remote.server.gestureQueue")
     private var isLeftDown = false
+    private var currentClickCount: Int64 = 1
 
     init() {
         setupListener()
@@ -111,11 +112,13 @@ class MacRemoteServer {
         case "LEFT_DOWN":
             let clickCount = components.count >= 2 ? Int64(components[1]) ?? 1 : 1
             isLeftDown = true
+            currentClickCount = clickCount
             postClickEvent(type: .leftMouseDown, button: .left, clickCount: clickCount)
         case "LEFT_UP":
             let clickCount = components.count >= 2 ? Int64(components[1]) ?? 1 : 1
             isLeftDown = false
             postClickEvent(type: .leftMouseUp, button: .left, clickCount: clickCount)
+            currentClickCount = 1
         case "RIGHT_CLICK":
             let clickCount = components.count >= 2 ? Int64(components[1]) ?? 1 : 1
             rightClick(clickCount: clickCount)
@@ -160,6 +163,10 @@ class MacRemoteServer {
 
         guard let moveEvent = CGEvent(mouseEventSource: nil, mouseType: eventType, mouseCursorPosition: targetPoint, mouseButton: .left) else {
             return
+        }
+
+        if isLeftDown {
+            moveEvent.setIntegerValueField(.mouseEventClickState, value: currentClickCount)
         }
 
         moveEvent.post(tap: .cghidEventTap)
