@@ -12,6 +12,9 @@ class MacRemoteServer {
     private var isLeftDown = false
     private var currentClickCount: Int64 = 1
 
+    private var isAtTopEdge = false
+    private var isAtBottomEdge = false
+
     init() {
         setupListener()
     }
@@ -159,6 +162,32 @@ class MacRemoteServer {
         let newY = currentLoc.y + CGFloat(dy)
         let targetPoint = CGPoint(x: newX, y: newY)
 
+        let screenRect = CGDisplayBounds(CGMainDisplayID())
+        let screenHeight = screenRect.height
+
+        // Detect reaching top edge (Menu Bar)
+        if newY <= 0 {
+            if !isAtTopEdge {
+                isAtTopEdge = true
+                triggerSystemEvent(keyCode: 120, modifier: "control") // Focus Menu Bar (Ctrl+F2)
+            }
+        } else if isAtTopEdge && newY > 10 { // Moving away from top
+            isAtTopEdge = false
+            // We use a slight delay or specific check if needed, but for now just send Esc
+            triggerSystemEvent(keyCode: 53, modifier: "") // Press Escape to close
+        }
+
+        // Detect reaching bottom edge (Dock)
+        if newY >= screenHeight - 2 { // Increased threshold slightly
+            if !isAtBottomEdge {
+                isAtBottomEdge = true
+                triggerSystemEvent(keyCode: 99, modifier: "control") // Focus Dock (Ctrl+F3)
+            }
+        } else if isAtBottomEdge && newY < screenHeight - 100 { // Increased threshold to clear Dock area
+            isAtBottomEdge = false
+            triggerSystemEvent(keyCode: 53, modifier: "") // Press Escape to close
+        }
+
         let eventType: CGEventType = isLeftDown ? .leftMouseDragged : .mouseMoved
 
         guard let moveEvent = CGEvent(mouseEventSource: nil, mouseType: eventType, mouseCursorPosition: targetPoint, mouseButton: .left) else {
@@ -201,12 +230,19 @@ class MacRemoteServer {
         // Run AppleScript on a separate serial queue to prevent blocking the network queue
         // and to ensure gestures are executed in the order they are received.
         gestureQueue.async {
-            let scriptSource = "tell application \"System Events\" to key code \(keyCode) using \(modifier) down"
+            let scriptSource: String
+            if modifier.isEmpty || modifier.lowercased() == "none" {
+                scriptSource = "tell application \"System Events\" to key code \(keyCode)"
+            } else {
+                scriptSource = "tell application \"System Events\" to key code \(keyCode) using {\(modifier) down}"
+            }
+
             var error: NSDictionary?
             if let script = NSAppleScript(source: scriptSource) {
                 script.executeAndReturnError(&error)
                 if let err = error {
                     print("🍎 AppleScript Error: \(err)")
+                    print("🍎 Script attempted: \(scriptSource)")
                 }
             }
         }
