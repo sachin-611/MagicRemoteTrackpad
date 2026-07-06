@@ -26,7 +26,7 @@ class MacRemoteServer {
     func start() {
         print("🚀 Server starting...")
         listener?.start(queue: queue)
-        print("✅ Server is running. Listening on UDP port \(PORT)")
+        print("✅ Server is running.")
         dispatchMain() // Keeps the command-line execution alive
     }
 
